@@ -5,7 +5,7 @@ calls `run(queries)` from `main.py`, which loads the prebuilt index from
 `artifacts/` and returns a ranked list of `page_id`s per query, scored by
 **NDCG@10**.
 
-**📹 Video presentation:** `[https://technionmail-my.sharepoint.com/:f:/g/personal/hila_litvak_campus_technion_ac_il/IgB35RJt5GCDR48lH9MThAcqAXmp_MY3yTbrJmX-1Gui9EA?e=KYktJd]`
+**📹 Video presentation:** `[[https://technionmail-my.sharepoint.com/:f:/g/personal/hila_litvak_campus_technion_ac_il/IgB35RJt5GCDR48lH9MThAcqAXmp_MY3yTbrJmX-1Gui9EA?e=KYktJd](https://technionmail-my.sharepoint.com/:v:/g/personal/hila_litvak_campus_technion_ac_il/IQCFbEt_vhqpSKBqGwiVYuPyAQ2INavKk-Cb0zN_yDXQULU?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=p0VTUh)]`
 
 ## Pipeline
 
