@@ -65,6 +65,30 @@ try:
 except Exception:  # pragma: no cover
     faiss = None
 
+try:
+    import torch as _torch
+    _DEVICE = "cuda" if _torch.cuda.is_available() else "cpu"
+except ImportError:
+    _DEVICE = "cpu"
+
+# ---------------------------------------------------------------------------
+# Cross-encoder reranking
+# ---------------------------------------------------------------------------
+CROSS_ENCODER_ENABLED = True
+CROSS_ENCODE_TOP_N = 60
+_CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_CROSS_ENCODER = None
+
+
+def _get_cross_encoder():
+    global _CROSS_ENCODER
+    if _CROSS_ENCODER is None:
+        from sentence_transformers import CrossEncoder
+        _CROSS_ENCODER = CrossEncoder(
+            _CROSS_ENCODER_MODEL, max_length=512, device=_DEVICE
+        )
+    return _CROSS_ENCODER
+
 # ---------------------------------------------------------------------------
 # Candidate generation
 # ---------------------------------------------------------------------------
@@ -74,8 +98,8 @@ DENSE_CANDIDATES = 2000       # chunks pulled from FAISS per query
 # Nudge the query vector toward the centroid of its top-K retrieved chunks, then
 # re-search.  Expands the query semantically using only MiniLM embeddings.
 DENSE_PRF = True
-DENSE_PRF_K = 8               # top chunks used to form the feedback centroid
-DENSE_PRF_BETA = 0.5          # centroid weight relative to the original query
+DENSE_PRF_K = 4               # top chunks used to form the feedback centroid
+DENSE_PRF_BETA = 0.3          # centroid weight relative to the original query
 BM25_CANDIDATES = 8000        # wide BM25 net for better recall
 TITLE_BM25_CANDIDATES = 500
 FINAL_POOL = 9000             # holds BM25+dense+title union
@@ -106,7 +130,8 @@ DENSE_AGG_SUM_WEIGHT = 0.10
 # contain those rare anchors in fusion lets them survive into the reranked
 # top-10.  Diagnostic showed this is the dominant failure mode for buried golds.
 ANCHOR_MATCH_WEIGHT = 0.015
-ANCHOR_TERMS_N = 2             # the N rarest query terms act as discriminators
+ANCHOR_TITLE_MATCH_WEIGHT = 0.030  # anchor in title is ~2× stronger than in body
+ANCHOR_TERMS_N = 3             # the N rarest query terms act as discriminators
 ANCHOR_MIN_IDF = 5.0           # only genuinely rare terms qualify as anchors
 ANCHOR_IDF_NORM = 9.0          # normaliser for anchor IDF scaling
 
@@ -122,6 +147,7 @@ PHRASE_WEIGHT = 0.22
 NUMBER_EVIDENCE_WEIGHT = 0.30   # raised: a rare exact number is a decisive key
 RELATIVE_YEAR_WEIGHT = 0.12
 FACET_COVERAGE_WEIGHT = 0.45    # reward covering several facets of "links A, B, C" queries
+TITLE_EVIDENCE_WEIGHT = 0.40    # rare query terms in page title → very strong evidence
 
 GENERIC_QUERY_TERMS = {
     "link", "links", "learned", "together", "connect", "connection",
@@ -550,10 +576,12 @@ def _auxiliary_boosts(
                 else set()
             )
             for term, idf in anchors:
-                if term in page_terms:
-                    boosts[pid] = boosts.get(pid, 0.0) + ANCHOR_MATCH_WEIGHT * min(
-                        1.0, idf / ANCHOR_IDF_NORM
-                    )
+                scale = min(1.0, idf / ANCHOR_IDF_NORM)
+                if term in title_terms:
+                    # Anchor in title is a near-definitive match — boost harder.
+                    boosts[pid] = boosts.get(pid, 0.0) + ANCHOR_TITLE_MATCH_WEIGHT * scale
+                elif term in page_terms:
+                    boosts[pid] = boosts.get(pid, 0.0) + ANCHOR_MATCH_WEIGHT * scale
     return boosts
 
 
@@ -674,11 +702,18 @@ def _literal_evidence_scores(
         terms = (
             state.page_term_sets[doc_idx] if doc_idx < len(state.page_term_sets) else set()
         )
+        title_terms = (
+            state.title_term_sets[doc_idx] if doc_idx < len(state.title_term_sets) else set()
+        )
         text = state.page_texts[doc_idx] if doc_idx < len(state.page_texts) else ""
         nums = state.page_numbers[doc_idx] if doc_idx < len(state.page_numbers) else set()
 
         rare_hit_weight = sum(w for t, w in term_weights.items() if t in terms)
         rare_coverage = rare_hit_weight / denom
+        # Rare query terms that appear in the page title are a much stronger
+        # discriminator than the same terms appearing only in the body.
+        title_rare_hit = sum(w for t, w in term_weights.items() if t in title_terms)
+        title_coverage = title_rare_hit / denom
         exact_terms = [t for t in base_terms if t not in GENERIC_QUERY_TERMS]
         exact_coverage = (
             sum(1 for t in exact_terms if t in terms) / max(1, len(exact_terms))
@@ -708,6 +743,7 @@ def _literal_evidence_scores(
 
         evidence = (
             RARE_COVERAGE_WEIGHT * rare_coverage
+            + TITLE_EVIDENCE_WEIGHT * title_coverage
             + EXACT_COVERAGE_WEIGHT * exact_coverage
             + PHRASE_WEIGHT * phrase_score
             + NUMBER_EVIDENCE_WEIGHT * number_score
@@ -740,6 +776,37 @@ def _rerank_with_literal_evidence(
         score += 0.015 * original_score
         reranked.append((pid, score))
     reranked.sort(key=lambda x: (-x[1], x[0]))
+    return reranked + tail
+
+
+# ---------------------------------------------------------------------------
+# Cross-encoder reranking (final stage)
+# ---------------------------------------------------------------------------
+
+def _cross_encoder_rerank(
+    state: RetrievalArtifacts,
+    query: str,
+    fused: List[Tuple[int, float]],
+) -> List[Tuple[int, float]]:
+    if not CROSS_ENCODER_ENABLED or not fused:
+        return fused
+    n = min(CROSS_ENCODE_TOP_N, len(fused))
+    head = fused[:n]
+    tail = fused[n:]
+    pairs: List[Tuple[str, str]] = []
+    for pid, _ in head:
+        doc_idx = state.pid_to_idx.get(int(pid))
+        if doc_idx is None:
+            pairs.append((query, ""))
+            continue
+        title = state.titles[doc_idx] if doc_idx < len(state.titles) else ""
+        body = state.page_texts[doc_idx] if doc_idx < len(state.page_texts) else ""
+        pairs.append((query, f"{title}. {body}"))
+    ce_scores = _get_cross_encoder().predict(pairs, batch_size=128, show_progress_bar=False)
+    reranked = sorted(
+        [(pid, float(s)) for (pid, _), s in zip(head, ce_scores)],
+        key=lambda x: -x[1],
+    )
     return reranked + tail
 
 
@@ -818,7 +885,10 @@ def search_batch(
         # --- Step 5: Literal-evidence reranking ---
         fused = _rerank_with_literal_evidence(state, query, fused)
 
-        # --- Step 6: Threshold + output ---
+        # --- Step 6: Cross-encoder reranking ---
+        fused = _cross_encoder_rerank(state, query, fused)
+
+        # --- Step 7: Threshold + output ---
         out.append(_threshold_ranked(fused, max_results=max_results))
 
     return out
