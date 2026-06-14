@@ -8,11 +8,7 @@ from sentence_transformers import SentenceTransformer
 
 from utils import EMBEDDING_MODEL_NAME
 
-try:
-    import torch
-    _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-except ImportError:
-    _DEVICE = "cpu"
+_DEVICE = "cuda"
 
 _model: SentenceTransformer | None = None
 
