@@ -19,7 +19,7 @@ calls `run(queries)` from `main.py`, which loads the prebuilt index from
 The corpus reuses vocabulary across many look-alike pages, so the pipeline
 rewards **specific discriminators** (rare keys, facet coverage) over generic
 topical similarity. The full empirical process behind these choices — including
-rejected experiments — is in [`EXPERIMENTS.md`](EXPERIMENTS.md) (NDCG@10 0.267 → 0.451).
+rejected experiments — is in [`EXPERIMENTS.md`](EXPERIMENTS.md) (NDCG@10 0.267 → 0.4536).
 
 ## Setup
 
