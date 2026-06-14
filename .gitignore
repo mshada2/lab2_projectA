@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Regenerable diagnostic outputs (findings live in EXPERIMENTS.md)
+public_diagnosis*.txt
+
+# Local baseline caches
+**/.baseline_local.json
+
+.venv/
+venv/

@@ -1,0 +1,25 @@
+{
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "dense_vectors": 100968,
+  "dense_dim": 384,
+  "bm25": {
+    "n_docs": 27074,
+    "vocab_size": 530527,
+    "total_postings": 17474646,
+    "avgdl": 1386.220703125
+  },
+  "title_bm25": {
+    "vocab_size": 21142,
+    "total_postings": 52450
+  },
+  "artifacts": [
+    "dense.faiss",
+    "chunk_meta.json",
+    "page_meta.json.gz",
+    "bm25_meta.json",
+    "bm25_postings.npz",
+    "bm25_doc_len.npy",
+    "title_bm25_meta.json",
+    "title_bm25_postings.npz"
+  ]
+}
