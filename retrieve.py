@@ -70,27 +70,21 @@ try:
     _DEVICE = "cuda" if _torch.cuda.is_available() else "cpu"
 except ImportError:
     _DEVICE = "cpu"
+
 # ---------------------------------------------------------------------------
 # Cross-encoder reranking
 # ---------------------------------------------------------------------------
 CROSS_ENCODER_ENABLED = True
 CROSS_ENCODE_TOP_N = 60
 
-# Final CE/base blending.
+# Best public setting so far: keep cross-encoder dominant, but preserve a
+# small amount of the pre-CE retrieval/literal score.
 CROSS_ENCODER_BLEND_ENABLED = True
 CROSS_ENCODER_CE_WEIGHT = 0.95
 CROSS_ENCODER_BASE_WEIGHT = 0.05
 
 _CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 _CROSS_ENCODER = None
-
-# Optional second-stage stronger reranker over only the final head.
-SECOND_STAGE_CE_ENABLED = True
-SECOND_STAGE_TOP_N = 3
-SECOND_STAGE_CE_WEIGHT = 0.8
-SECOND_STAGE_STAGE1_WEIGHT = 0.2
-_SECOND_STAGE_MODEL = "cross-encoder/ms-marco-MiniLM-L4-v2"
-_SECOND_STAGE_ENCODER = None
 
 
 def _get_cross_encoder():
@@ -102,14 +96,6 @@ def _get_cross_encoder():
         )
     return _CROSS_ENCODER
 
-def _get_second_stage_cross_encoder():
-    global _SECOND_STAGE_ENCODER
-    if _SECOND_STAGE_ENCODER is None:
-        from sentence_transformers import CrossEncoder
-        _SECOND_STAGE_ENCODER = CrossEncoder(
-            _SECOND_STAGE_MODEL, max_length=512, device=_DEVICE
-        )
-    return _SECOND_STAGE_ENCODER
 # ---------------------------------------------------------------------------
 # Candidate generation
 # ---------------------------------------------------------------------------
@@ -152,7 +138,7 @@ DENSE_AGG_SUM_WEIGHT = 0.10
 # top-10.  Diagnostic showed this is the dominant failure mode for buried golds.
 ANCHOR_MATCH_WEIGHT = 0.015
 ANCHOR_TITLE_MATCH_WEIGHT = 0.030  # anchor in title is ~2× stronger than in body
-ANCHOR_TERMS_N = 3             # the N rarest query terms act as discriminators
+ANCHOR_TERMS_N = 4             # the N rarest query terms act as discriminators
 ANCHOR_MIN_IDF = 5.0           # only genuinely rare terms qualify as anchors
 ANCHOR_IDF_NORM = 9.0          # normaliser for anchor IDF scaling
 
@@ -857,66 +843,6 @@ def _cross_encoder_rerank(
     reranked.sort(key=lambda x: (-x[1], x[0]))
     return reranked + tail
 
-def _second_stage_cross_encoder_rerank(
-    state: RetrievalArtifacts,
-    query: str,
-    fused: List[Tuple[int, float]],
-) -> List[Tuple[int, float]]:
-    """Optional stronger CE pass over only the final head.
-
-    Stage 1 already uses the fast L6 cross-encoder over top 60.
-    This stage tests whether a stronger L12 model improves ordering inside
-    the final top 15/20 candidates.
-    """
-    if not SECOND_STAGE_CE_ENABLED or not fused:
-        return fused
-
-    n = min(SECOND_STAGE_TOP_N, len(fused))
-    head = fused[:n]
-    tail = fused[n:]
-
-    pairs: List[Tuple[str, str]] = []
-
-    for pid, _ in head:
-        doc_idx = state.pid_to_idx.get(int(pid))
-        if doc_idx is None:
-            pairs.append((query, ""))
-            continue
-
-        title = state.titles[doc_idx] if doc_idx < len(state.titles) else ""
-        body = state.page_texts[doc_idx] if doc_idx < len(state.page_texts) else ""
-        pairs.append((query, f"{title}. {body}"))
-
-    second_scores = _get_second_stage_cross_encoder().predict(
-        pairs,
-        batch_size=64,
-        show_progress_bar=False,
-    )
-
-    second_raw: Dict[int, float] = {}
-    stage1_raw: Dict[int, float] = {}
-
-    for (pid, stage1_score), second_score in zip(head, second_scores):
-        pid = int(pid)
-        second_raw[pid] = float(second_score)
-        stage1_raw[pid] = float(stage1_score)
-
-    second_norm = _normalize_scores(second_raw)
-    stage1_norm = _normalize_scores(stage1_raw)
-
-    reranked: List[Tuple[int, float]] = []
-
-    for pid, _ in head:
-        pid = int(pid)
-        final_score = (
-            SECOND_STAGE_CE_WEIGHT * second_norm.get(pid, 0.0)
-            + SECOND_STAGE_STAGE1_WEIGHT * stage1_norm.get(pid, 0.0)
-        )
-        reranked.append((pid, float(final_score)))
-
-    reranked.sort(key=lambda x: (-x[1], x[0]))
-    return reranked + tail
-
 
 # ---------------------------------------------------------------------------
 # Threshold + final output
@@ -996,10 +922,7 @@ def search_batch(
         # --- Step 6: Cross-encoder reranking ---
         fused = _cross_encoder_rerank(state, query, fused)
 
-        # --- Step 7: Optional second-stage stronger cross-encoder ---
-        fused = _second_stage_cross_encoder_rerank(state, query, fused)
-
-        # --- Step 8: Threshold + output ---
+        # --- Step 7: Threshold + output ---
         out.append(_threshold_ranked(fused, max_results=max_results))
 
     return out
