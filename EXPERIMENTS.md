@@ -50,18 +50,48 @@ require `python scripts/build_index.py`.
 | 17 | **CE/base score blend**: normalize both CE logits and base scores to [0,1], blend with weights. Swept 1.0/0.0, 0.95/0.05, 0.90/0.10, 0.80/0.20 | `retrieve.py` | **0.4428** | ✅ 0.95/0.05 | +0.0013. Small base contribution breaks CE ties. More base weight hurts — CE signal dominates correctly. |
 
 | 18 | **Partner variant adopted**: `RERANK_TOP_N` 200→1000, `DENSE_PRF_K` 6→4, `DENSE_PRF_BETA` 0.4→0.3; per-query FAISS calls instead of batched | `retrieve.py` | **0.4433** | ✅ | +0.0005. Wider literal-evidence pool (1000 vs 200) before cross-encoder gives marginal but consistent gain. |
+| 19 | **Cross-encoder input windowing**: replace full `title + body` CE input with shorter title/evidence-window text chosen by lexical/query overlap | `retrieve.py` | 0.3518 | ❌ reverted | Large drop despite faster runtime (~28 s). Finding: the cross-encoder benefits from the original full `title + body` input and its own 512-token truncation. Manually selecting evidence windows removed useful context and hurt ranking badly. |
+| 20 | **Global cross-encoder batching**: collect CE pairs for all queries, run one larger `predict()` call, then split scores back per query | `retrieve.py` | 0.4396 | ❌ not kept | Same NDCG as the tested variant and only modest runtime improvement (~47 s → ~43 s). Useful architecture idea, but not worth the extra code complexity after later configurations were faster/better. |
+| 21 | **Cross-encoder candidate-union admission**: build the CE head from a union of signal-specific pools (fused, BM25, title BM25, dense, anchor/number evidence) instead of top fused/literal candidates | `retrieve.py` | 0.4106 / 0.4095 / 0.4173 | ❌ reverted | All tested allocations were much worse. Finding: the fused/literal rank is already a strong candidate filter; adding pages that are high under only one individual signal introduces distractors that the CE does not fully recover from. |
+| 22 | **TOP_N sweep after the 0.4433 baseline**: retest CE candidate depth with the new CE/base blend and partner variant | `retrieve.py` | | | |
+| | TOP_N=70 | | 0.4424 | ❌ | Slightly worse than 60 and slower (38.16 s). |
+| | TOP_N=80 | | 0.4419 | ❌ | Worse and slower (41.12 s). |
+| | TOP_N=90 | | 0.4419 | ❌ | No gain, much slower (45.87 s). |
+| | TOP_N=100 | | 0.4419 | ❌ | No gain, much slower (46.60 s). Confirms `CROSS_ENCODE_TOP_N=60` is still the right first-stage CE budget. |
+| 23 | **Second-stage stronger cross-encoder**: after L6 reranks top-60, add a second CE over only the final head | `retrieve.py` | | | |
+| | `ms-marco-MiniLM-L12-v2` top-20 | | 0.4305 | ❌ | Too broad; L12 promotes plausible distractors. Runtime 45.77 s. |
+| | `ms-marco-MiniLM-L12-v2` top-15 | | 0.4305 | ❌ | Same failure pattern. Runtime 43.76 s. |
+| | `ms-marco-MiniLM-L12-v2` top-10 | | 0.4461 | — | Improves over 0.4433; L12 useful only after L6 has narrowed the head. Runtime 40.19 s. |
+| | `ms-marco-MiniLM-L12-v2` top-8 | | 0.4467 | — | Slightly better. Runtime 39.95 s. |
+| | `ms-marco-MiniLM-L12-v2` top-5 | | 0.4484 | — | Better. Runtime 39.53 s. |
+| | `ms-marco-MiniLM-L12-v2` top-3 | | **0.4512** | ✅ | Best L12 config. L12 works as a conservative head refiner, not a broad reranker. Runtime 37.75 s. |
+| | `ms-marco-MiniLM-L12-v2` top-2 | | 0.4433 | ❌ | Too little freedom to improve ordering. Runtime 36.75 s. |
+| | `ms-marco-MiniLM-L12-v2` top-1 | | 0.4433 | ❌ | Cannot reorder anything. Runtime 37.63 s. |
+| 24 | **Second-stage blend sweep** with L12 top-3: vary final L12/stage-1 score blend (100/0, 90/10, 85/15, 80/20, 70/30, 60/40) | `retrieve.py` | **0.4512** | ✅ no change | All ratios give identical NDCG@10 = 0.4512 (~37–38 s). Kept 80/20 for consistency. Once restricted to top-3, L12 candidate order is stable and insensitive to blend. |
+| 25 | **Second-stage model sweep** with top-3 and 80/20 blend | `retrieve.py` | | | |
+| | `cross-encoder/ms-marco-MiniLM-L4-v2` | | **0.4536** | ✅ | New best. Slightly better than L12 and safely under runtime limit (~38.08 s). L4 works best as a final precision refiner over the three most trusted candidates. |
+| | `cross-encoder/ms-marco-electra-base` | | 0.4471 | ❌ | Worse than L4/L12 and slower (~42.84 s). |
 
-**Best confirmed configuration: NDCG@10 = 0.4433**
-- `CROSS_ENCODE_TOP_N = 60`, `CROSS_ENCODER_CE_WEIGHT = 0.95`, `CROSS_ENCODER_BASE_WEIGHT = 0.05`
+**Best confirmed configuration: NDCG@10 = 0.4536**
+- `CROSS_ENCODE_TOP_N = 60`, first-stage CE: `ms-marco-MiniLM-L-6-v2`, blend 0.95/0.05
+- Second-stage CE: `ms-marco-MiniLM-L4-v2` over top-3, blend 0.80/0.20
 - `DENSE_PRF_K = 4`, `DENSE_PRF_BETA = 0.3`, `RERANK_TOP_N = 1000`
-- Per-query FAISS calls + batched CE predict (batch_size=128)
-- 180-word chunks; RRF (dense/body/title 0.40/0.45/0.15, RRF_K=20)
+- Per-query FAISS calls; 180-word chunks; RRF (dense/body/title 0.40/0.45/0.15, RRF_K=20)
 - Literal-evidence rerank with rare-key number+word anchors, title evidence, facet coverage
-- +66% over the 0.2674 baseline
+- Runtime: ~38.08 s on 29 public queries
+- +69.6% over the 0.2674 baseline
 
 > Changes 1–4 were applied together for the 0.3243 result above. To attribute the
 > gain to each rule individually (for the write-up/video), revert one at a time
 > with git and re-run `eval_public.py`, filling the per-row `NDCG@10` cells.
+
+## Cross-encoder design conclusions
+
+- The first-stage L6 CE should see a broad but bounded pool (`TOP_N=60`); beyond 60 adds distractors.
+- Full `title + body` input must be kept — hand-selected evidence windows remove too much context.
+- Signal-specific candidate union hurts — fused/literal rank is already the best admission filter.
+- A second-stage CE is only useful over a very small final head (top-3); wider second-stage reranking hurts.
+- Best second-stage model: `ms-marco-MiniLM-L4-v2` — acts as a final precision refiner, not a broad reranker.
 
 ## Observations that drove the design (from inspecting the data)
 
