@@ -39,7 +39,7 @@ On a fresh clone this runs **without rebuilding** — the `artifacts/` are
 > and `ms-marco-MiniLM-L4-v2`) are downloaded automatically from HuggingFace
 > on first use (~200 MB total). Subsequent runs use the local cache.
 >
-> **Query time:** ~38 s on 29 public queries (GPU); estimated ~65 s on the
+> **Query time:** ~36 s on 29 public queries (GPU); estimated ~55 s on the
 > 50 hidden queries.
 committed (large binaries via Git LFS).
 
