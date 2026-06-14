@@ -26,22 +26,26 @@ rejected experiments — is in [`EXPERIMENTS.md`](EXPERIMENTS.md) (NDCG@10 0.267
 ```bash
 pip install -r requirements.txt
 ```
+## Clone
+
+This repository stores large artifact files using Git LFS. Before cloning, make sure Git LFS is installed:
+
+```bash
+git lfs install
+git clone https://github.com/mshada2/lab2_projectA.git
+cd lab2_projectA
 
 ## Evaluate (no rebuild needed)
 
 ```bash
-python scripts/eval_public.py     # mean NDCG@10 on the public queries
+python scripts/eval_public.py     # mean NDCG@10 on the public queries, use python3 if python is unavialable
 ```
 
-On a fresh clone this runs **without rebuilding** — the `artifacts/` are
+On a fresh clone, public evaluation runs without rebuilding the index. The prebuilt files under `artifacts/` are committed to the repository, with large binaries stored via Git LFS.
 
-> **First-run note:** the two cross-encoder models (`ms-marco-MiniLM-L-6-v2`
-> and `ms-marco-MiniLM-L4-v2`) are downloaded automatically from HuggingFace
-> on first use (~200 MB total). Subsequent runs use the local cache.
+> First-run note: the two cross-encoder models (`ms-marco-MiniLM-L-6-v2` and `ms-marco-MiniLM-L4-v2`) are downloaded automatically from HuggingFace on first use (~200 MB total). Subsequent runs use the local cache.
 >
-> **Query time:** ~36 s on 29 public queries (GPU); estimated ~55 s on the
-> 50 hidden queries.
-committed (large binaries via Git LFS).
+> Query time: ~36 s on 29 public queries (GPU), ~50 s on 50 public queries.
 
 ## Build the index (offline only — not run at grading)
 
@@ -76,7 +80,7 @@ retrieve.py utils.py        query-time retrieval + shared helpers
 eval.py                     NDCG@10 utilities (read-only)
 scripts/                    build_index.py, eval_public.py (read-only)
 nano_scripts/               diagnose.py, tune.py (dev tools)
-data/                       public_queries.json + Wikipedia Entries/ (corpus)
+data/                       public_queries.json only; full Wikipedia Entries corpus is not committed
 artifacts/                  prebuilt index (committed; Git LFS for big files)
 EXPERIMENTS.md              measured design process
 ```
