@@ -1,0 +1,4 @@
+artifacts/bm25_postings.npz filter=lfs diff=lfs merge=lfs -text
+artifacts/bm25_meta.json filter=lfs diff=lfs merge=lfs -text
+artifacts/dense.faiss filter=lfs diff=lfs merge=lfs -text
+artifacts/page_meta.json.gz filter=lfs diff=lfs merge=lfs -text
