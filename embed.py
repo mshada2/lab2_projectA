@@ -6,7 +6,7 @@ from typing import List, Sequence
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from utils import EMBEDDING_MODEL_NAME
+from utils import ARTIFACTS_DIR, EMBEDDING_MODEL_NAME
 
 _DEVICE = "cuda"
 
@@ -16,7 +16,9 @@ _model: SentenceTransformer | None = None
 def get_model() -> SentenceTransformer:
     global _model
     if _model is None:
-        _model = SentenceTransformer(EMBEDDING_MODEL_NAME, device=_DEVICE)
+        _local = ARTIFACTS_DIR / "minilm"
+        _source = str(_local) if _local.exists() else EMBEDDING_MODEL_NAME
+        _model = SentenceTransformer(_source, device=_DEVICE)
         print(f"Embedding model loaded on: {_DEVICE}")
     return _model
 

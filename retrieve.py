@@ -76,6 +76,7 @@ CROSS_ENCODER_CE_WEIGHT = 0.95
 CROSS_ENCODER_BASE_WEIGHT = 0.05
 
 _CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_CROSS_ENCODER_LOCAL = ARTIFACTS_DIR / "ce_stage1"
 _CROSS_ENCODER = None
 
 # Optional second-stage stronger reranker over only the final head.
@@ -84,6 +85,7 @@ SECOND_STAGE_TOP_N = 3
 SECOND_STAGE_CE_WEIGHT = 0.8
 SECOND_STAGE_STAGE1_WEIGHT = 0.2
 _SECOND_STAGE_MODEL = "cross-encoder/ms-marco-MiniLM-L4-v2"
+_SECOND_STAGE_LOCAL = ARTIFACTS_DIR / "ce_stage2"
 _SECOND_STAGE_ENCODER = None
 
 
@@ -92,7 +94,7 @@ def _get_cross_encoder():
     if _CROSS_ENCODER is None:
         from sentence_transformers import CrossEncoder
         _CROSS_ENCODER = CrossEncoder(
-            _CROSS_ENCODER_MODEL, max_length=512, device="cuda",
+            (str(_CROSS_ENCODER_LOCAL) if _CROSS_ENCODER_LOCAL.exists() else _CROSS_ENCODER_MODEL), max_length=512, device="cuda",
         )
     return _CROSS_ENCODER
 
@@ -101,7 +103,7 @@ def _get_second_stage_cross_encoder():
     if _SECOND_STAGE_ENCODER is None:
         from sentence_transformers import CrossEncoder
         _SECOND_STAGE_ENCODER = CrossEncoder(
-            _SECOND_STAGE_MODEL, max_length=512, device="cuda",
+            (str(_SECOND_STAGE_LOCAL) if _SECOND_STAGE_LOCAL.exists() else _SECOND_STAGE_MODEL), max_length=512, device="cuda",
         )
     return _SECOND_STAGE_ENCODER
 # ---------------------------------------------------------------------------
