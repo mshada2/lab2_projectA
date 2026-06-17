@@ -103,3 +103,11 @@ require `python scripts/build_index.py`.
   pages, so generic semantic/lexical similarity is weak. Discrimination comes
   from rare keys and specific facet combinations — which is what changes 1, 3, 4
   optimise for.
+
+## Runtime & deployment (final submission)
+
+All three models (the MiniLM embedder + both cross-encoders) are saved under
+`artifacts/` (`minilm/`, `ce_stage1/`, `ce_stage2/`) and loaded from disk, so
+`run()` performs no HuggingFace downloads at grade time — a download would count
+toward the 60 s limit (per the course forum). Measured `run()`: ~38 s on 29
+public queries; ~50 s projected on the 50-query hidden set, within the cap.
